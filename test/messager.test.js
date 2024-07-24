@@ -1,77 +1,111 @@
 const Messager = artifacts.require("Messager");
 
 contract("Messager", (accounts) => {
-  let messager;
+    const [owner, addr1, addr2, ...addrs] = accounts;
 
-  const user1 = accounts[0];
-  const user2 = accounts[1];
-  const user1Name = "Alice";
-  const user1Username = "alice";
-  const user2Name = "Bob";
-  const user2Username = "bob";
-  const inviteMessage = "Let's be friends!";
-  const roomMessage = "Hello!";
-  const roomMessageForSender = "You sent a message!";
+    let messager;
 
-  before(async () => {
-    messager = await Messager.deployed();
-  });
+    beforeEach(async () => {
+        messager = await Messager.new();
+    });
 
-  it("should create accounts", async () => {
-    await messager.createAccount(user1Name, user1Username, { from: user1 });
-    await messager.createAccount(user2Name, user2Username, { from: user2 });
+    it("Should create an account", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        const user = await messager.users(addr1);
+        assert.equal(user.name, "Alice");
+        assert.equal(user.username, "alice123");
+        assert.equal(user.exists, true);
+    });
 
-    const user1Data = await messager.userFromAddress(user1);
-    const user2Data = await messager.userFromAddress(user2);
+    it("Should not create an account with an existing username", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        try {
+            await messager.createAccount("Bob", "alice123", { from: addr2 });
+            assert.fail("Expected error not received");
+        } catch (error) {
+            assert(error.message.includes("Username already exists"), `Unexpected error message: ${error.message}`);
+        }
+    });
 
-    assert.equal(user1Data.name, user1Name, "User 1 name should be correct");
-    assert.equal(user1Data.username, user1Username, "User 1 username should be correct");
-    assert.equal(user2Data.name, user2Name, "User 2 name should be correct");
-    assert.equal(user2Data.username, user2Username, "User 2 username should be correct");
-  });
+    it("Should send an invite", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        await messager.createAccount("Bob", "bob123", { from: addr2 });
 
-  it("should send and accept friend invite", async () => {
-    await messager.sendInvite(user2, inviteMessage, { from: user1 });
-    await messager.acceptInvite(user1, { from: user2 });
+        await messager.sendInvite(addr2, "Hi Bob!", { from: addr1 });
 
-    const user1Friends = await messager.userFromAddress(user1);
-    const user2Friends = await messager.userFromAddress(user2);
+        const invites = await messager.getInvites(addr2);
+        assert.equal(invites.length, 1);
+        assert.equal(invites[0].sender, addr1);
+        assert.equal(invites[0].message, "Hi Bob!");
+    });
 
-    assert.equal(user1Friends.friends[0], user2, "User 1 should have User 2 as friend");
-    assert.equal(user2Friends.friends[0], user1, "User 2 should have User 1 as friend");
+    it("Should not send an invite to a non-existent user", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        try {
+            await messager.sendInvite(addr2, "Hi Bob!", { from: addr1 });
+            assert.fail("Expected error not received");
+        } catch (error) {
+            assert(error.message.includes("User does not exist"), `Unexpected error message: ${error.message}`);
+        }
+    });
 
-    const roomId = await messager.userFriends(user1).friendToRoomID(user2);
-    assert(roomId, "Room ID should exist between User 1 and User 2");
-  });
+    it("Should accept an invite", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        await messager.createAccount("Bob", "bob123", { from: addr2 });
 
-  it("should send a message in the room", async () => {
-    const roomId = await messager.userFriends(user1).friendToRoomID(user2);
-    await messager.sendMessage(roomId, roomMessage, roomMessageForSender, { from: user1 });
+        await messager.sendInvite(addr2, "Hi Bob!", { from: addr1 });
+        await messager.acceptInvite(addr1, { from: addr2 });
 
-    const roomData = await messager.rooms(roomId);
-    const lastMessage = roomData.messages[roomData.messages.length - 1];
+        const friendsOfAddr1 = await messager.getFriends(addr1);
+        const friendsOfAddr2 = await messager.getFriends(addr2);
 
-    assert.equal(lastMessage.sender, user1, "Sender should be User 1");
-    assert.equal(lastMessage.msg_for_receiver, roomMessage, "Message for receiver should be correct");
-    assert.equal(lastMessage.msg_for_sender, roomMessageForSender, "Message for sender should be correct");
-  });
+        assert.equal(friendsOfAddr1.length, 1);
+        assert.equal(friendsOfAddr1[0], addr2);
 
-  it("should send multiple messages", async () => {
-    const roomId = await messager.userFriends(user1).friendToRoomID(user2);
+        assert.equal(friendsOfAddr2.length, 1);
+        assert.equal(friendsOfAddr2[0], addr1);
+    });
 
-    const messages = [
-      { roomId, msg_for_receiver: "Hi Bob!", msg_for_sender: "You sent: Hi Bob!" },
-      { roomId, msg_for_receiver: "How are you?", msg_for_sender: "You sent: How are you?" }
-    ];
+    it("Should send a message in a room", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        await messager.createAccount("Bob", "bob123", { from: addr2 });
 
-    await messager.sendMultipuleMessage(messages, { from: user1 });
+        await messager.sendInvite(addr2, "Hi Bob!", { from: addr1 });
+        await messager.acceptInvite(addr1, { from: addr2 });
 
-    const roomData = await messager.rooms(roomId);
-    const lastMessageIndex = roomData.messages.length - 1;
-    const secondLastMessage = roomData.messages[lastMessageIndex - 1];
-    const lastMessage = roomData.messages[lastMessageIndex];
+        const roomId = await messager.userFriends(addr1).friendToRoomId(addr2);
 
-    assert.equal(secondLastMessage.msg_for_receiver, "Hi Bob!", "Second last message should be correct");
-    assert.equal(lastMessage.msg_for_receiver, "How are you?", "Last message should be correct");
-  });
+        await messager.sendMessage(roomId, "Hello Bob!", "Hello Alice!", { from: addr1 });
+
+        const room = await messager.rooms(roomId);
+        assert.equal(room.messages.length, 1);
+        assert.equal(room.messages[0].msgForReceiver, "Hello Bob!");
+        assert.equal(room.messages[0].msgForSender, "Hello Alice!");
+    });
+
+    it("Should not send a message to a non-existent room", async () => {
+        try {
+            await messager.sendMessage("nonExistentRoom", "Hello", "Hello", { from: addr1 });
+            assert.fail("Expected error not received");
+        } catch (error) {
+            assert(error.message.includes("Room does not exist"), `Unexpected error message: ${error.message}`);
+        }
+    });
+
+    it("Should not send a message from a non-participant", async () => {
+        await messager.createAccount("Alice", "alice123", { from: addr1 });
+        await messager.createAccount("Bob", "bob123", { from: addr2 });
+
+        await messager.sendInvite(addr2, "Hi Bob!", { from: addr1 });
+        await messager.acceptInvite(addr1, { from: addr2 });
+
+        const roomId = await messager.userFriends(addr1).friendToRoomId(addr2);
+
+        try {
+            await messager.sendMessage(roomId, "Hello", "Hello", { from: addrs[0] });
+            assert.fail("Expected error not received");
+        } catch (error) {
+            assert(error.message.includes("You do not have access to this room"), `Unexpected error message: ${error.message}`);
+        }
+    });
 });

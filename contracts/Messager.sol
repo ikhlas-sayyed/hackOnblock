@@ -106,14 +106,12 @@ contract Messager {
             users[_user].friends.push(users[msg.sender].username);
         }
 
-        Room memory newRoom = Room({
-            roomId: roomId,
-            user1: msg.sender,
-            user2: _user,
-            messages: new Message , // Initialize with an empty array
-            createdAt: block.timestamp,
-            exists: true
-        });
+       Room storage newRoom = rooms[roomId];
+        newRoom.roomId = roomId;
+        newRoom.user1 = msg.sender;
+        newRoom.user2 = _user;
+        newRoom.createdAt = block.timestamp;
+        newRoom.exists = true;
         rooms[roomId] = newRoom;
     }
 
